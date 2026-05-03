@@ -402,14 +402,14 @@ function magName(mag) {
 function buildReportHTML(info, charts, logoDataURL) {
     const magList = ['High Mag (M11)', 'Low Mag (M15)', 'Low Mag (M19)'];
 
-    // ── Status colors matching the PDF reference image (light palette)
+    // ── Status colors — matches original Mac app reference exactly
     const STATUS_LIGHT = {
-        Excellent:  { bg:'#16a34a', text:'#fff' },
-        Optimal:    { bg:'#0284c7', text:'#fff' },
-        Good:       { bg:'#22c55e', text:'#000' },
-        Acceptable: { bg:'#eab308', text:'#000' },
-        Bad:        { bg:'#dc2626', text:'#fff' },
-        Terrible:   { bg:'#7f1d1d', text:'#fff' },
+        Excellent:  { bg:'#22c55e', text:'#fff' },   // bright green
+        Optimal:    { bg:'#67e8f9', text:'#0e7490' }, // cyan tint, dark cyan text
+        Good:       { bg:'#bbf7d0', text:'#166534' }, // light green tint
+        Acceptable: { bg:'#fde047', text:'#713f12' }, // yellow
+        Bad:        { bg:'#f97316', text:'#fff' },    // orange
+        Terrible:   { bg:'#dc2626', text:'#fff' },    // red
     };
 
     // ── Build stats for a mag type (returns {xSt, ySt, xCpk, yCpk})
@@ -428,7 +428,9 @@ function buildReportHTML(info, charts, logoDataURL) {
             if (nd) return '<td colspan="1">—</td>';
             const s   = getStatus(cpkVal);
             const sc  = STATUS_LIGHT[s.text] || { bg: s.bg, text: s.color };
-            return `<td class="badge-cell" style="background:${sc.bg};color:${sc.text}">${s.text}</td>`;
+            // Use background-image gradient instead of background-color:
+            // Chrome strips background-color when saving as PDF but respects background-image
+            return `<td class="badge-cell" style="background-image:linear-gradient(${sc.bg},${sc.bg});color:${sc.text}">${s.text}</td>`;
         };
         return { xSt, ySt, xCpk, yCpk, lim, nd, fmt, stBadge };
     }
@@ -523,6 +525,8 @@ function buildReportHTML(info, charts, logoDataURL) {
 <title>CPK VITROX Report — ${esc(info.customer)}</title>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  /* CRITICAL: force browser to print background colors */
+  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important;}
   body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#111;background:#fff;}
   @page{margin:14mm 16mm;size:A4;}
 
@@ -541,19 +545,19 @@ function buildReportHTML(info, charts, logoDataURL) {
   /* ── CUSTOMER TABLE ── */
   .info-table{border-collapse:collapse;margin-bottom:14px;}
   .info-table td{padding:4px 10px;border:1px solid #ccc;font-size:9.5pt;}
-  .info-table td:first-child{background:#f5f5f5;font-weight:700;width:115px;color:#222;}
+  .info-table td:first-child{background-image:linear-gradient(#f0f0f0,#f0f0f0);font-weight:700;width:115px;color:#222;}
 
   /* ── MAG SECTIONS ── */
   .mag-section{margin-bottom:12px;page-break-inside:avoid;}
   .mag-title{text-align:center;font-size:13pt;font-weight:800;
-    border:1.5px solid #222;padding:5px;background:#f8f8f8;letter-spacing:-.01em;}
+    border:1.5px solid #222;padding:5px;background-image:linear-gradient(#f0f0f0,#f0f0f0);letter-spacing:-.01em;}
   .stats-table{width:100%;border-collapse:collapse;font-size:8.5pt;}
-  .stats-table th{background:#efefef;border:1px solid #ccc;padding:4px 8px;
+  .stats-table th{background-image:linear-gradient(#e8e8e8,#e8e8e8);border:1px solid #ccc;padding:4px 8px;
     text-align:center;font-size:9pt;font-weight:700;}
-  .axis-head{background:#e8e8e8;}
+  .axis-head{background-image:linear-gradient(#dde8f0,#dde8f0);}
   .lbl-col{width:105px;}
   .stats-table td{border:1px solid #d4d4d4;padding:3.5px 8px;}
-  .row-lbl{text-align:right;background:#fafafa;font-size:8.5pt;color:#333;}
+  .row-lbl{text-align:right;background-image:linear-gradient(#f7f7f7,#f7f7f7);font-size:8.5pt;color:#333;}
   .val{text-align:right;font-variant-numeric:tabular-nums;}
   .mono{font-family:'Courier New',monospace;font-size:8pt;}
   .badge-cell{text-align:center;font-weight:700;font-size:8pt;letter-spacing:.03em;width:68px;}
@@ -563,7 +567,7 @@ function buildReportHTML(info, charts, logoDataURL) {
   .criteria-title{font-size:9pt;font-weight:700;margin-bottom:4px;color:#444;text-transform:uppercase;letter-spacing:.05em;}
   .criteria-table{border-collapse:collapse;}
   .criteria-table td{border:1px solid #ccc;padding:3px 10px;font-size:9pt;}
-  .criteria-table td:first-child{background:#fafafa;width:140px;}
+  .criteria-table td:first-child{background-image:linear-gradient(#f7f7f7,#f7f7f7);width:140px;}
   .criteria-table td:last-child{font-weight:700;text-align:center;width:80px;}
 
   /* ── CHARTS PAGE ── */
@@ -613,12 +617,12 @@ ${magSections}
 <div class="criteria-wrap">
   <div class="criteria-title">CPK Reference</div>
   <table class="criteria-table">
-    <tr><td>CPK &gt;= 2.0</td>          <td style="background:#16a34a;color:#fff">Excellent</td></tr>
-    <tr><td>2.0 &gt; CPK &gt;= 1.67</td><td style="background:#0284c7;color:#fff">Optimal</td></tr>
-    <tr><td>1.67 &gt; CPK &gt;= 1.33</td><td style="background:#22c55e;color:#000">Good</td></tr>
-    <tr><td>1.33 &gt; CPK &gt;= 1.0</td><td style="background:#eab308;color:#000">Acceptable</td></tr>
-    <tr><td>1.0 &gt; CPK &gt;= 0.67</td><td style="background:#dc2626;color:#fff">Bad</td></tr>
-    <tr><td>0.67 &gt; CPK</td>           <td style="background:#7f1d1d;color:#fff">Terrible</td></tr>
+    <tr><td>CPK &gt;= 2.0</td>           <td style="background-image:linear-gradient(#22c55e,#22c55e);color:#fff;font-weight:700">Excellent</td></tr>
+    <tr><td>2.0 &gt; CPK &gt;= 1.67</td> <td style="background-image:linear-gradient(#67e8f9,#67e8f9);color:#0e7490;font-weight:700">Optimal</td></tr>
+    <tr><td>1.67 &gt; CPK &gt;= 1.33</td><td style="background-image:linear-gradient(#bbf7d0,#bbf7d0);color:#166534;font-weight:700">Good</td></tr>
+    <tr><td>1.33 &gt; CPK &gt;= 1.0</td> <td style="background-image:linear-gradient(#fde047,#fde047);color:#713f12;font-weight:700">Acceptable</td></tr>
+    <tr><td>1.0 &gt; CPK &gt;= 0.67</td> <td style="background-image:linear-gradient(#f97316,#f97316);color:#fff;font-weight:700">Bad</td></tr>
+    <tr><td>0.67 &gt; CPK</td>           <td style="background-image:linear-gradient(#dc2626,#dc2626);color:#fff;font-weight:700">Terrible</td></tr>
   </table>
 </div>
 
