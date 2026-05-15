@@ -35,6 +35,14 @@ function getStatusStyle(label) {
     return STATUS_COLORS[label] || STATUS_COLORS['N/A'];
 }
 
+// Helper: formatea un número permitiendo Infinity como "∞"
+function fmtNum(value, decimals = 0) {
+    if (value === null || value === undefined) return '—';
+    if (value === Infinity || value === -Infinity) return '∞';
+    if (typeof value === 'number' && isNaN(value)) return '—';
+    return Number(value).toFixed(decimals);
+}
+
 // ── Carga de archivos ─────────────────────────────────────────────────────────
 document.getElementById('folder-input').addEventListener('change', async e => {
     const files = e.target.files;
@@ -43,18 +51,22 @@ document.getElementById('folder-input').addEventListener('change', async e => {
     showLoading('Cargando logs…');
 
     const fileList = [];
-    const readPromises = [];
-
+    // Lectura robusta: si un archivo falla, lo saltamos en lugar de romper todo
     for (const f of files) {
         if (!f.name.toLowerCase().endsWith('.log')) continue;
-        readPromises.push(
-            f.text().then(content => fileList.push({ filename: f.name, content }))
-        );
+        try {
+            const content = await f.text();
+            fileList.push({ filename: f.name, content });
+        } catch (err) {
+            console.warn(`[CPK] No se pudo leer ${f.name}:`, err);
+        }
     }
 
-    await Promise.all(readPromises);
     rawFiles   = fileList;
     cpkResults = CPK.processLogFiles(fileList);
+
+    console.log(`[CPK] ${fileList.length} archivos leídos, ${cpkResults.length} magnificaciones detectadas:`,
+                cpkResults.map(r => `${r.label} (${r.sampleCount} muestras)`));
 
     // Seleccionar la primera magnificación detectada por defecto
     selectedMag = cpkResults.length > 0 ? cpkResults[0].magnification : null;
@@ -167,29 +179,29 @@ function buildStatsCard(elId, title, stat, badgeId) {
         <div class="stats-divider"></div>
         <div class="stat-row">
             <span class="stat-label">Std Deviation</span>
-            <span class="stat-value">${stat.sigma.toFixed(4)}</span>
+            <span class="stat-value">${fmtNum(stat.sigma, 4)}</span>
         </div>
         <div class="stat-row">
             <span class="stat-label">Mean</span>
-            <span class="stat-value">${stat.mu.toFixed(0)}</span>
+            <span class="stat-value">${fmtNum(stat.mu, 0)}</span>
         </div>
         <div class="stats-divider"></div>
         <div class="stat-row">
             <span class="stat-label">USL <small>(µ+6σ)</small></span>
-            <span class="stat-value">${stat.usl.toFixed(0)}</span>
+            <span class="stat-value">${fmtNum(stat.usl, 0)}</span>
         </div>
         <div class="stat-row">
             <span class="stat-label">LSL <small>(µ−6σ)</small></span>
-            <span class="stat-value">${stat.lsl.toFixed(0)}</span>
+            <span class="stat-value">${fmtNum(stat.lsl, 0)}</span>
         </div>
         <div class="stats-divider"></div>
         <div class="cpk-row">
             <span class="cpk-label">Cp</span>
-            <span class="cpk-value">${stat.cp.toFixed(12)}</span>
+            <span class="cpk-value">${fmtNum(stat.cp, 12)}</span>
         </div>
         <div class="cpk-row">
             <span class="cpk-label">Cpk</span>
-            <span class="cpk-value">${stat.cpk.toFixed(12)}</span>
+            <span class="cpk-value">${fmtNum(stat.cpk, 12)}</span>
         </div>
         <div class="status-badge"
              style="background:${s.bg};color:${s.color};box-shadow:0 4px 14px ${s.bg}55">
@@ -239,12 +251,19 @@ function renderCharts(result) {
 }
 
 function buildChart(canvasId, _unused, stat, axis, mag) {
-    // Destruir instancia anterior si existe
-    const key = `${mag}-${axis}`;
-    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
 
-    // Reconstruir values a partir del stat — necesitamos los raw values
-    // Los almacenamos al procesar para poder graficarlos
+    // CRÍTICO: destruir CUALQUIER chart existente sobre este canvas
+    // (no solo el de la misma mag — al cambiar tabs el canvas se reutiliza)
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+
+    // Limpiar de nuestro registro también
+    for (const key of Object.keys(charts)) {
+        if (key.endsWith(`-${axis}`)) delete charts[key];
+    }
+
     const result = cpkResults.find(r => r.magnification === mag);
     if (!result) return;
 
@@ -252,11 +271,11 @@ function buildChart(canvasId, _unused, stat, axis, mag) {
     if (!values || !values.length) return;
 
     const { usl, lsl, mu: mean } = stat;
-    const minV = Math.min(...values, lsl);
-    const maxV = Math.max(...values, usl);
-    const pad  = (maxV - minV) * 0.2;
-    const ctx  = document.getElementById(canvasId);
-    if (!ctx) return;
+    const minV  = Math.min(...values, lsl);
+    const maxV  = Math.max(...values, usl);
+    const range = maxV - minV;
+    // Si todos los valores son idénticos, usar padding sintético para que se vea la gráfica
+    const pad   = range === 0 ? Math.max(1000, Math.abs(mean) * 0.0001) : range * 0.2;
 
     const inst = new Chart(ctx.getContext('2d'), {
         type: 'line',
@@ -347,7 +366,7 @@ function buildChart(canvasId, _unused, stat, axis, mag) {
         }
     });
 
-    charts[key] = inst;
+    charts[`${mag}-${axis}`] = inst;
 }
 
 // ── Modal PDF ─────────────────────────────────────────────────────────────────
@@ -543,7 +562,6 @@ function buildReportHTML(info, pngMap, logoDataURL) {
     // Secciones por magnificación
     const magSections = cpkResults.map(r => {
         const nd  = !r.x || !r.y;
-        const fmt = (v, d=0) => nd ? 'N/A' : Number(v).toFixed(d);
         return `
         <div class="mag-section">
           <div class="mag-title">${r.label}</div>
@@ -558,37 +576,37 @@ function buildReportHTML(info, pngMap, logoDataURL) {
             <tbody>
               <tr>
                 <td class="row-lbl">Std Deviation</td>
-                <td colspan="2" class="val">${fmt(r.x.sigma, 4)}</td>
-                <td colspan="2" class="val">${fmt(r.y.sigma, 4)}</td>
+                <td colspan="2" class="val">${fmtNum(r.x?.sigma, 4)}</td>
+                <td colspan="2" class="val">${fmtNum(r.y?.sigma, 4)}</td>
               </tr>
               <tr>
                 <td class="row-lbl">Mean</td>
-                <td colspan="2" class="val">${fmt(r.x.mu)}</td>
-                <td colspan="2" class="val">${fmt(r.y.mu)}</td>
+                <td colspan="2" class="val">${fmtNum(r.x?.mu)}</td>
+                <td colspan="2" class="val">${fmtNum(r.y?.mu)}</td>
               </tr>
               <tr>
                 <td class="row-lbl">USL (µ+6σ)</td>
-                <td colspan="2" class="val">${fmt(r.x.usl)}</td>
-                <td colspan="2" class="val">${fmt(r.y.usl)}</td>
+                <td colspan="2" class="val">${fmtNum(r.x?.usl)}</td>
+                <td colspan="2" class="val">${fmtNum(r.y?.usl)}</td>
               </tr>
               <tr>
                 <td class="row-lbl">LSL (µ−6σ)</td>
-                <td colspan="2" class="val">${fmt(r.x.lsl)}</td>
-                <td colspan="2" class="val">${fmt(r.y.lsl)}</td>
+                <td colspan="2" class="val">${fmtNum(r.x?.lsl)}</td>
+                <td colspan="2" class="val">${fmtNum(r.y?.lsl)}</td>
               </tr>
               <tr>
-                <td class="row-lbl">Cp</td>
-                <td class="val mono">${fmt(r.x.cp, 12)}</td>
-                ${stBadge(r.x.cp)}
-                <td class="val mono">${fmt(r.y.cp, 12)}</td>
-                ${stBadge(r.y.cp)}
+                <td class="row-lbl">Cm</td>
+                <td class="val mono">${fmtNum(r.x?.cp, 12)}</td>
+                ${stBadge(r.x?.cp)}
+                <td class="val mono">${fmtNum(r.y?.cp, 12)}</td>
+                ${stBadge(r.y?.cp)}
               </tr>
               <tr>
-                <td class="row-lbl">Cpk</td>
-                <td class="val mono">${fmt(r.x.cpk, 12)}</td>
-                ${stBadge(r.x.cpk)}
-                <td class="val mono">${fmt(r.y.cpk, 12)}</td>
-                ${stBadge(r.y.cpk)}
+                <td class="row-lbl">Cmk</td>
+                <td class="val mono">${fmtNum(r.x?.cpk, 12)}</td>
+                ${stBadge(r.x?.cpk)}
+                <td class="val mono">${fmtNum(r.y?.cpk, 12)}</td>
+                ${stBadge(r.y?.cpk)}
               </tr>
             </tbody>
           </table>
@@ -702,14 +720,14 @@ function buildReportHTML(info, pngMap, logoDataURL) {
 ${magSections}
 
 <div class="criteria-wrap">
-  <div class="criteria-title">CPK Reference</div>
+  <div class="criteria-title">CM/CMK Reference</div>
   <table class="criteria-table">
-    <tr><td>CPK &gt;= 2.0</td>           <td style="background-image:linear-gradient(#22c55e,#22c55e);color:#fff">Excellent</td></tr>
-    <tr><td>2.0 &gt; CPK &gt;= 1.67</td> <td style="background-image:linear-gradient(#67e8f9,#67e8f9);color:#0e7490">Optimal</td></tr>
-    <tr><td>1.67 &gt; CPK &gt;= 1.33</td><td style="background-image:linear-gradient(#bbf7d0,#bbf7d0);color:#166534">Good</td></tr>
-    <tr><td>1.33 &gt; CPK &gt;= 1.0</td> <td style="background-image:linear-gradient(#fde047,#fde047);color:#713f12">Acceptable</td></tr>
-    <tr><td>1.0 &gt; CPK &gt;= 0.67</td> <td style="background-image:linear-gradient(#f97316,#f97316);color:#fff">Bad</td></tr>
-    <tr><td>0.67 &gt; CPK</td>           <td style="background-image:linear-gradient(#dc2626,#dc2626);color:#fff">Terrible</td></tr>
+    <tr><td>CMK &gt;= 2.0</td>           <td style="background-image:linear-gradient(#22c55e,#22c55e);color:#fff">Excellent</td></tr>
+    <tr><td>2.0 &gt; CMK &gt;= 1.67</td> <td style="background-image:linear-gradient(#67e8f9,#67e8f9);color:#0e7490">Optimal</td></tr>
+    <tr><td>1.67 &gt; CMK &gt;= 1.33</td><td style="background-image:linear-gradient(#bbf7d0,#bbf7d0);color:#166534">Good</td></tr>
+    <tr><td>1.33 &gt; CMK &gt;= 1.0</td> <td style="background-image:linear-gradient(#fde047,#fde047);color:#713f12">Acceptable</td></tr>
+    <tr><td>1.0 &gt; CMK &gt;= 0.67</td> <td style="background-image:linear-gradient(#f97316,#f97316);color:#fff">Bad</td></tr>
+    <tr><td>0.67 &gt; CMK</td>           <td style="background-image:linear-gradient(#dc2626,#dc2626);color:#fff">Terrible</td></tr>
   </table>
 </div>
 
