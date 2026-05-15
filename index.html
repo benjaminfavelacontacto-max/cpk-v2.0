@@ -45,7 +45,7 @@
         <div class="build-badge">
             <span class="build-dot"></span>
             <span class="build-label">BUILD</span>
-            <span class="build-version">2.6</span>
+            <span class="build-version">2.7</span>
         </div>
 
         <button class="btn btn-primary" onclick="document.getElementById('folder-input').click()">
@@ -324,7 +324,120 @@
     </div>
 </div>
 
-<!-- ══════════════════════════ LOADING OVERLAY ══════════════════ -->
+<!-- ══════════════════════════ FILE LOADER (animated multi-phase) ══════ -->
+<div id="file-loader" class="file-loader" style="display:none">
+    <div class="file-loader-bg"></div>
+
+    <div class="file-loader-card">
+
+        <!-- HUD top bar -->
+        <div class="fl-hud-top">
+            <div class="fl-hud-block">
+                <span class="fl-hud-label">PHASE</span>
+                <span class="fl-hud-value mono" id="fl-phase-label">SCANNING</span>
+            </div>
+            <div class="fl-hud-dot"></div>
+            <div class="fl-hud-block">
+                <span class="fl-hud-label">STATUS</span>
+                <span class="fl-hud-value mono" id="fl-status-label">ACTIVE</span>
+            </div>
+        </div>
+
+        <!-- Animated icon -->
+        <div class="fl-icon">
+            <svg viewBox="0 0 120 120" class="fl-icon-svg" id="fl-icon-svg">
+                <!-- Outer rotating dashed ring -->
+                <circle class="fl-ring fl-ring--outer" cx="60" cy="60" r="52"
+                        fill="none" stroke="rgba(0,212,255,0.35)"
+                        stroke-width="1" stroke-dasharray="3 6"/>
+                <!-- Middle ring -->
+                <circle class="fl-ring fl-ring--middle" cx="60" cy="60" r="40"
+                        fill="none" stroke="rgba(10,132,255,0.6)"
+                        stroke-width="1.2" stroke-dasharray="10 3"/>
+                <!-- Inner ring -->
+                <circle cx="60" cy="60" r="28"
+                        fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+                <!-- Scanning line -->
+                <line class="fl-scan-line" x1="20" y1="60" x2="100" y2="60"
+                      stroke="rgba(0,212,255,0.7)" stroke-width="1"
+                      stroke-linecap="round"/>
+                <!-- Center pulse -->
+                <circle class="fl-core" cx="60" cy="60" r="5" fill="#00d4ff"/>
+                <circle class="fl-core-halo" cx="60" cy="60" r="9"
+                        fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.5"/>
+                <!-- Success check (hidden by default) -->
+                <path class="fl-check" id="fl-check"
+                      d="M 40 60 L 54 74 L 80 46"
+                      fill="none" stroke="#30d158" stroke-width="4"
+                      stroke-linecap="round" stroke-linejoin="round"
+                      style="display:none"/>
+            </svg>
+            <div class="fl-icon-halo"></div>
+        </div>
+
+        <!-- Main message -->
+        <h2 class="fl-title" id="fl-title">Analizando carpeta</h2>
+        <p class="fl-subtitle" id="fl-subtitle">Buscando archivos .log</p>
+
+        <!-- Progress bar -->
+        <div class="fl-progress">
+            <div class="fl-progress-track">
+                <div class="fl-progress-fill" id="fl-progress-fill"></div>
+                <div class="fl-progress-shimmer"></div>
+            </div>
+            <div class="fl-progress-meta">
+                <span class="mono fl-progress-count">
+                    <span id="fl-count">0</span>
+                    <span class="fl-progress-sep">/</span>
+                    <span id="fl-total">0</span>
+                </span>
+                <span class="fl-progress-percent mono" id="fl-percent">0%</span>
+            </div>
+        </div>
+
+        <!-- Real-time stats -->
+        <div class="fl-stats">
+            <div class="fl-stat">
+                <span class="fl-stat-dot fl-stat-dot--green"></span>
+                <div class="fl-stat-text">
+                    <span class="fl-stat-label">LOADED</span>
+                    <span class="fl-stat-value mono" id="fl-stat-loaded">0</span>
+                </div>
+            </div>
+            <div class="fl-stat">
+                <span class="fl-stat-dot fl-stat-dot--orange"></span>
+                <div class="fl-stat-text">
+                    <span class="fl-stat-label">SKIPPED</span>
+                    <span class="fl-stat-value mono" id="fl-stat-skipped">0</span>
+                </div>
+            </div>
+            <div class="fl-stat">
+                <span class="fl-stat-dot fl-stat-dot--cyan"></span>
+                <div class="fl-stat-text">
+                    <span class="fl-stat-label">MAGS</span>
+                    <span class="fl-stat-value mono" id="fl-stat-mags">0</span>
+                </div>
+            </div>
+            <div class="fl-stat">
+                <span class="fl-stat-dot fl-stat-dot--indigo"></span>
+                <div class="fl-stat-text">
+                    <span class="fl-stat-label">SAMPLES</span>
+                    <span class="fl-stat-value mono" id="fl-stat-samples">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current file activity -->
+        <div class="fl-activity">
+            <span class="fl-activity-label mono">CURRENT</span>
+            <span class="fl-activity-arrow">›</span>
+            <span class="fl-activity-file mono" id="fl-activity-file">—</span>
+        </div>
+
+    </div>
+</div>
+
+<!-- ══════════════════════════ LOADING OVERLAY (simple, for PDF) ══════ -->
 <div id="loading-overlay" style="display:none">
     <div class="spinner"></div>
     <p id="loading-text">Generando reporte…</p>
