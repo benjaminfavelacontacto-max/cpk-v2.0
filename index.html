@@ -3,57 +3,221 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CPK VITROX</title>
+    <title>CPK VITROX — Industrial Intelligence System</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 </head>
 <body>
 
+<!-- ══════════════════════════ AMBIENT BACKGROUND ══════════════════════ -->
+<div class="app-bg" aria-hidden="true">
+    <div class="app-bg-grid"></div>
+    <div class="app-bg-glow app-bg-glow--cyan"></div>
+    <div class="app-bg-glow app-bg-glow--indigo"></div>
+    <div class="app-bg-scan"></div>
+</div>
+
 <!-- ══════════════════════════ TOP BAR ══════════════════════════ -->
 <header id="topbar">
-    <div class="logo-wrap">
-        <img id="smt-logo" src="assets/SMTLogo.png" alt="SMT"
-             onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='flex'">
-        <div id="logo-fallback" class="logo-fallback">SMT</div>
+    <div class="topbar-left">
+        <div class="logo-wrap">
+            <img id="smt-logo" src="assets/SMTLogo.png" alt="SMT"
+                 onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='flex'">
+            <div id="logo-fallback" class="logo-fallback">SMT</div>
+        </div>
+        <div class="brand-divider"></div>
+        <div class="brand-meta">
+            <div class="brand-title">CPK <span>VITROX</span></div>
+            <div class="brand-subtitle">
+                <span class="brand-status-dot"></span>
+                INDUSTRIAL INTELLIGENCE · ONLINE
+            </div>
+        </div>
     </div>
 
     <div class="topbar-right">
-        <span class="version-badge">v2.5</span>
+        <div class="build-badge">
+            <span class="build-dot"></span>
+            <span class="build-label">BUILD</span>
+            <span class="build-version">2.6</span>
+        </div>
+
         <button class="btn btn-primary" onclick="document.getElementById('folder-input').click()">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg>
-            Cargar Carpeta
+            <span>Cargar Carpeta</span>
         </button>
 
         <button id="pdf-btn" class="btn btn-danger" onclick="openPDFModal()" disabled>
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-            Descargar PDF
+            <span>Descargar PDF</span>
         </button>
     </div>
 
     <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
 </header>
 
-<!-- ══════════════════════════ EMPTY STATE ══════════════════════ -->
+<!-- ══════════════════════════ EMPTY STATE — HUD HERO ══════════════════ -->
 <div id="empty-state">
-    <div class="empty-glow"></div>
-    <div class="empty-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
-            <path d="M22 12H16L14 15H10L8 12H2"/><path d="M5.45 5.11L2 12V18a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>
-        </svg>
-    </div>
-    <h2>Sin Datos Cargados</h2>
-    <p class="empty-sub">Selecciona una carpeta con archivos .log para comenzar</p>
-    <button class="btn btn-primary btn-lg" onclick="document.getElementById('folder-input').click()">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/></svg>
-        Cargar Carpeta de Logs
-    </button>
+
+    <!-- HUD corner brackets -->
+    <div class="hud-corner hud-corner--tl"></div>
+    <div class="hud-corner hud-corner--tr"></div>
+    <div class="hud-corner hud-corner--bl"></div>
+    <div class="hud-corner hud-corner--br"></div>
+
+    <!-- Decorative side readouts -->
+    <aside class="hud-readout hud-readout--left">
+        <div class="readout-block">
+            <div class="readout-label">SYSTEM</div>
+            <div class="readout-value">
+                <span class="readout-dot readout-dot--green"></span>READY
+            </div>
+        </div>
+        <div class="readout-block">
+            <div class="readout-label">METHOD</div>
+            <div class="readout-value mono">±6σ DYN</div>
+        </div>
+        <div class="readout-block">
+            <div class="readout-label">UPTIME</div>
+            <div class="readout-value mono" id="uptime-display">00:00:00</div>
+        </div>
+    </aside>
+
+    <aside class="hud-readout hud-readout--right">
+        <div class="readout-block readout-block--right">
+            <div class="readout-label">DETECTOR</div>
+            <div class="readout-value">
+                <span class="readout-dot readout-dot--cyan"></span>ARMED
+            </div>
+        </div>
+        <div class="readout-block readout-block--right">
+            <div class="readout-label">CHANNELS</div>
+            <div class="readout-value mono">06 / 06</div>
+        </div>
+        <div class="readout-block readout-block--right">
+            <div class="readout-label">FORMAT</div>
+            <div class="readout-value mono">.LOG</div>
+        </div>
+    </aside>
+
+    <!-- Hero card -->
+    <main class="hero-card">
+
+        <div class="hero-icon">
+            <svg viewBox="0 0 120 120" class="hero-icon-svg" aria-hidden="true">
+                <circle class="ring ring--outer" cx="60" cy="60" r="54"
+                        fill="none" stroke="rgba(0,212,255,0.35)"
+                        stroke-width="0.8" stroke-dasharray="2 5"/>
+                <circle class="ring ring--middle" cx="60" cy="60" r="42"
+                        fill="none" stroke="rgba(10,132,255,0.5)"
+                        stroke-width="1" stroke-dasharray="12 4 2 4"/>
+                <circle cx="60" cy="60" r="30"
+                        fill="none" stroke="rgba(255,255,255,0.15)"
+                        stroke-width="1"/>
+                <g class="crosshair" stroke="rgba(0,212,255,0.7)" stroke-width="1" stroke-linecap="round">
+                    <line x1="60" y1="6"  x2="60" y2="22"/>
+                    <line x1="60" y1="98" x2="60" y2="114"/>
+                    <line x1="6"  y1="60" x2="22" y2="60"/>
+                    <line x1="98" y1="60" x2="114" y2="60"/>
+                </g>
+                <g fill="rgba(0,212,255,0.9)">
+                    <circle cx="60" cy="6"   r="1.5"/>
+                    <circle cx="60" cy="114" r="1.5"/>
+                    <circle cx="6"  cy="60"  r="1.5"/>
+                    <circle cx="114" cy="60" r="1.5"/>
+                </g>
+                <g class="data-dots">
+                    <circle cx="38" cy="38" r="1.8" fill="#00d4ff"/>
+                    <circle cx="82" cy="44" r="1.8" fill="#0a84ff"/>
+                    <circle cx="46" cy="78" r="1.8" fill="#5e5ce6"/>
+                    <circle cx="78" cy="82" r="1.8" fill="#00d4ff"/>
+                    <circle cx="72" cy="32" r="1.5" fill="rgba(48,209,88,0.9)"/>
+                    <circle cx="32" cy="68" r="1.5" fill="rgba(48,209,88,0.9)"/>
+                </g>
+                <circle class="core" cx="60" cy="60" r="4" fill="#00d4ff"/>
+                <circle class="core-glow" cx="60" cy="60" r="8"
+                        fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+            </svg>
+            <div class="hero-icon-halo"></div>
+        </div>
+
+        <div class="hero-text">
+            <div class="hero-eyebrow">
+                <span class="eyebrow-bracket">[</span>
+                AWAITING INPUT
+                <span class="eyebrow-bracket">]</span>
+            </div>
+            <h1 class="hero-title">Sin Datos<br>Cargados</h1>
+            <p class="hero-subtitle">
+                Carga una carpeta con archivos <span class="mono inline-code">.log</span>
+                para iniciar el análisis automático de capacidad de máquina.
+            </p>
+        </div>
+
+        <button class="hero-cta" onclick="document.getElementById('folder-input').click()">
+            <span class="cta-bg"></span>
+            <span class="cta-content">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/>
+                </svg>
+                <span>Cargar Carpeta de Logs</span>
+                <svg class="cta-arrow" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8"
+                          stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </span>
+        </button>
+
+        <div class="hero-specs">
+            <div class="spec">
+                <div class="spec-value">6</div>
+                <div class="spec-label">MAGNIFICATIONS</div>
+            </div>
+            <div class="spec-divider"></div>
+            <div class="spec">
+                <div class="spec-value">5</div>
+                <div class="spec-label">AXI MODELS</div>
+            </div>
+            <div class="spec-divider"></div>
+            <div class="spec">
+                <div class="spec-value mono">±6σ</div>
+                <div class="spec-label">DYNAMIC LIMITS</div>
+            </div>
+            <div class="spec-divider"></div>
+            <div class="spec">
+                <div class="spec-value">AUTO</div>
+                <div class="spec-label">DETECTION</div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="hud-footer">
+        <div class="hud-footer-block">
+            <span class="hud-footer-label">SYS</span>
+            <span class="hud-footer-val mono">CPK-VITROX v2.6</span>
+        </div>
+        <div class="hud-footer-block">
+            <span class="hud-footer-label">ENGINE</span>
+            <span class="hud-footer-val mono">POPULATION σ</span>
+        </div>
+        <div class="hud-footer-block">
+            <span class="hud-footer-label">RUNTIME</span>
+            <span class="hud-footer-val mono">BROWSER · WEBKIT</span>
+        </div>
+    </footer>
+
 </div>
 
-<!-- ══════════════════════════ MAIN CONTENT ══════════════════════ -->
+<!-- ══════════════════════════ MAIN CONTENT ══════════════════════════ -->
 <div id="main-content" style="display:none">
 
-    <!-- LEFT: Tabla de archivos -->
     <div id="left-panel">
         <div class="panel-header">
             <span id="log-count">LOGS (0)</span>
@@ -74,20 +238,13 @@
         </div>
     </div>
 
-    <!-- RIGHT: Tabs + Stats + Charts -->
     <div id="right-panel">
-
-        <!-- Tabs de magnificación (dinámicos) -->
         <div id="mag-tabs" class="mag-tabs-bar"></div>
-
-        <!-- Stats cards row -->
         <div class="stats-row">
             <div id="stats-x" class="stats-card" data-axis="x"></div>
             <div id="stats-y" class="stats-card" data-axis="y"></div>
             <div id="legend-card" class="stats-card legend-card"></div>
         </div>
-
-        <!-- Charts -->
         <div class="charts-section">
             <div class="chart-wrap">
                 <div class="chart-header">
@@ -175,5 +332,19 @@
 
 <script src="js/cpk.js"></script>
 <script src="js/app.js"></script>
+<script>
+    (function() {
+        const start = Date.now();
+        const el = document.getElementById('uptime-display');
+        if (!el) return;
+        setInterval(() => {
+            const t = Math.floor((Date.now() - start) / 1000);
+            const h = String(Math.floor(t / 3600)).padStart(2, '0');
+            const m = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
+            const s = String(t % 60).padStart(2, '0');
+            el.textContent = `${h}:${m}:${s}`;
+        }, 1000);
+    })();
+</script>
 </body>
 </html>
