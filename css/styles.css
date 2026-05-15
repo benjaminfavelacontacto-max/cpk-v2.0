@@ -633,8 +633,9 @@ body {
     font-size: 42px;
     font-weight: 800;
     letter-spacing: -.035em;
-    line-height: .98;
+    line-height: 1.08;
     margin-bottom: 16px;
+    padding-bottom: 6px;
     background: linear-gradient(180deg,
         #ffffff 0%,
         rgba(255,255,255,.85) 50%,
