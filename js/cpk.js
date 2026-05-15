@@ -236,6 +236,8 @@ function processLogFiles(files) {
       sampleCount:   g.xValues.length,
       x:             statX,
       y:             statY,
+      _xRaw:         g.xValues,   // valores raw para gráficas
+      _yRaw:         g.yValues,
       cpk:           overallCpk,
       status:        getCpkStatus(overallCpk),
     });
@@ -257,6 +259,8 @@ function processLogFiles(files) {
       sampleCount:   g.xValues.length,
       x:             statX,
       y:             statY,
+      _xRaw:         g.xValues,
+      _yRaw:         g.yValues,
       cpk:           overallCpk,
       status:        getCpkStatus(overallCpk),
     });
