@@ -1,50 +1,75 @@
 'use strict';
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let allLogData  = [];
-let selectedMag = 'High Mag (M11)';
-let chartX      = null;
-let chartY      = null;
-const limits    = JSON.parse(JSON.stringify(DEFAULT_LIMITS));
+let cpkResults  = [];   // Array de resultados por magnificación
+let rawFiles    = [];   // [{ filename, content }] — para la tabla y PDF
+let selectedMag = null; // Clave activa ej. 'M11', 'M19', 'M23'
+const charts    = {};   // { 'M11-x': Chart, 'M11-y': Chart, ... }
 
 // ── Apple Dark chart palette ──────────────────────────────────────────────────
 const D = {
-    line:      '#0a84ff',
-    fill:      'rgba(10,132,255,0.07)',
-    point:     '#0a84ff',
-    pointBdr:  'rgba(255,255,255,0.12)',
-    grid:      'rgba(255,255,255,0.065)',
-    tick:      '#636366',
-    uslColor:  'rgba(255,69,58,0.85)',
-    meanColor: 'rgba(48,209,88,0.9)',
-    annText:   '#fff',
-    annPad:    { x: 7, y: 4 },
-    annRad:    5
+    line:     '#0a84ff',
+    fill:     'rgba(10,132,255,0.07)',
+    point:    '#0a84ff',
+    pointBdr: 'rgba(255,255,255,0.12)',
+    grid:     'rgba(255,255,255,0.065)',
+    tick:     '#636366',
+    uslColor: 'rgba(255,69,58,0.85)',
+    annText:  '#fff',
+    annPad:   { x: 7, y: 4 },
+    annRad:   5
 };
 
-// ── Events ────────────────────────────────────────────────────────────────────
-document.getElementById('mag-select').addEventListener('change', e => {
-    selectedMag = e.target.value;
-    render();
-});
+// ── Status → colores UI ───────────────────────────────────────────────────────
+const STATUS_COLORS = {
+    'Excellent':  { bg: '#30d158', color: '#000' },
+    'Optimal':    { bg: '#32ade6', color: '#000' },
+    'Good':       { bg: '#34c759', color: '#000' },
+    'Acceptable': { bg: '#3a3a3c', color: '#fff' },
+    'Bad':        { bg: '#ff9f0a', color: '#000' },
+    'Terrible':   { bg: '#ff453a', color: '#fff' },
+    'N/A':        { bg: '#48484a', color: '#fff' },
+};
 
+function getStatusStyle(label) {
+    return STATUS_COLORS[label] || STATUS_COLORS['N/A'];
+}
+
+// ── Carga de archivos ─────────────────────────────────────────────────────────
 document.getElementById('folder-input').addEventListener('change', async e => {
     const files = e.target.files;
     if (!files || !files.length) return;
+
     showLoading('Cargando logs…');
-    allLogData = await parseLogs(files);
+
+    const fileList = [];
+    const readPromises = [];
+
+    for (const f of files) {
+        if (!f.name.toLowerCase().endsWith('.log')) continue;
+        readPromises.push(
+            f.text().then(content => fileList.push({ filename: f.name, content }))
+        );
+    }
+
+    await Promise.all(readPromises);
+    rawFiles   = fileList;
+    cpkResults = CPK.processLogFiles(fileList);
+
+    // Seleccionar la primera magnificación detectada por defecto
+    selectedMag = cpkResults.length > 0 ? cpkResults[0].magnification : null;
+
     e.target.value = '';
     render();
     hideLoading();
 });
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// ── Render principal ──────────────────────────────────────────────────────────
 function render() {
-    const cur     = allLogData.filter(d => d.magType === selectedMag);
-    const hasData = cur.length > 0;
+    const hasData = cpkResults.length > 0;
 
-    document.getElementById('empty-state').style.display  = hasData ? 'none' : 'flex';
-    document.getElementById('main-content').style.display = hasData ? 'flex' : 'none';
+    document.getElementById('empty-state').style.display  = hasData ? 'none'  : 'flex';
+    document.getElementById('main-content').style.display = hasData ? 'flex'  : 'none';
     document.getElementById('pdf-btn').disabled            = !hasData;
 
     const dot = document.querySelector('.panel-header-dot');
@@ -52,72 +77,133 @@ function render() {
 
     if (!hasData) return;
 
-    renderTable(cur);
-    renderStatsCards(cur);
-    renderLegend();
-    renderCharts(cur);
+    renderTabs();
+    renderTable();
+    renderContent();
 }
 
-// ── Table ─────────────────────────────────────────────────────────────────────
-function renderTable(data) {
-    document.getElementById('log-count').textContent = `LOGS (${data.length})`;
-    document.getElementById('log-tbody').innerHTML = data.map(d => `
+// ── Tabs de magnificación ─────────────────────────────────────────────────────
+function renderTabs() {
+    const container = document.getElementById('mag-tabs');
+    if (!container) return;
+
+    container.innerHTML = cpkResults.map(r => {
+        const s   = getStatusStyle(r.status.label);
+        const act = r.magnification === selectedMag;
+        return `
+        <button class="mag-tab ${act ? 'active' : ''}"
+                onclick="selectMag('${r.magnification}')"
+                style="${act
+                    ? `--tab-accent:${s.bg};border-color:${s.bg}44;background:${s.bg}15;color:${s.bg}`
+                    : ''}">
+            <span class="mag-tab-label">${r.label}</span>
+            <span class="mag-tab-badge"
+                  style="background:${s.bg}22;color:${s.bg};border:1px solid ${s.bg}44">
+                ${r.status.label}
+            </span>
+        </button>`;
+    }).join('');
+}
+
+function selectMag(mag) {
+    selectedMag = mag;
+    renderTabs();
+    renderContent();
+}
+
+// ── Tabla de archivos ─────────────────────────────────────────────────────────
+function renderTable() {
+    // Construir mapa mag → label
+    const magMap = {};
+    cpkResults.forEach(r => { magMap[r.magnification] = r.label; });
+
+    // Recolectar todas las filas
+    const rows = [];
+    for (const r of cpkResults) {
+        r.files.forEach(filename => {
+            // Buscar el log correspondiente para sacar X/Y
+            const log = CPK.parseLogFile(filename,
+                rawFiles.find(f => f.filename === filename)?.content || '');
+            if (!log || !log.entries.length) return;
+            const e = log.entries[0];
+            rows.push({ filename, mag: r.label, x: e.x, y: e.y });
+        });
+    }
+
+    // Ordenar por filename
+    rows.sort((a, b) => a.filename.localeCompare(b.filename));
+
+    document.getElementById('log-count').textContent = `LOGS (${rows.length})`;
+    document.getElementById('log-tbody').innerHTML = rows.map(r => `
         <tr>
-            <td title="${d.filename}">${d.filename}</td>
-            <td>${d.x.toFixed(0)}</td>
-            <td>${d.y.toFixed(0)}</td>
+            <td title="${r.filename}">${r.filename}</td>
+            <td><span class="table-mag-chip">${r.mag}</span></td>
+            <td>${r.x.toFixed(0)}</td>
+            <td>${r.y.toFixed(0)}</td>
         </tr>`).join('');
 }
 
-// ── Stats Cards ───────────────────────────────────────────────────────────────
-function renderStatsCards(data) {
-    const lim = limits[selectedMag];
-    buildStatsCard('stats-x', 'X-Ray Spot (X)', data.map(d => d.x), lim.xLSL, lim.xUSL, 'badge-x');
-    buildStatsCard('stats-y', 'X-Ray Spot (Y)', data.map(d => d.y), lim.yLSL, lim.yUSL, 'badge-y');
+// ── Contenido del panel derecho ───────────────────────────────────────────────
+function renderContent() {
+    const result = cpkResults.find(r => r.magnification === selectedMag);
+    if (!result) return;
+
+    renderStatsCards(result);
+    renderLegend();
+    renderCharts(result);
 }
 
-function buildStatsCard(elId, title, values, lsl, usl, badgeId) {
-    const { mean, stdDev } = calcStats(values);
-    const { cpk }          = calcCPK(mean, stdDev, lsl, usl);
-    const s                = getStatus(cpk);
+// ── Stats Cards ───────────────────────────────────────────────────────────────
+function renderStatsCards(result) {
+    buildStatsCard('stats-x', 'X-Ray Spot (X)', result.x, 'badge-x');
+    buildStatsCard('stats-y', 'X-Ray Spot (Y)', result.y, 'badge-y');
+}
+
+function buildStatsCard(elId, title, stat, badgeId) {
+    const s = getStatusStyle(CPK.getCpkStatus(stat.cpk).label);
 
     document.getElementById(elId).innerHTML = `
         <h3>${title}</h3>
         <div class="stats-divider"></div>
         <div class="stat-row">
             <span class="stat-label">Std Deviation</span>
-            <span class="stat-value">${stdDev.toFixed(4)}</span>
+            <span class="stat-value">${stat.sigma.toFixed(4)}</span>
         </div>
         <div class="stat-row">
             <span class="stat-label">Mean</span>
-            <span class="stat-value">${mean.toFixed(0)}</span>
+            <span class="stat-value">${stat.mu.toFixed(0)}</span>
         </div>
         <div class="stats-divider"></div>
         <div class="stat-row">
-            <span class="stat-label">LSL</span>
-            <span class="stat-value">${lsl.toFixed(0)}</span>
+            <span class="stat-label">USL <small>(µ+6σ)</small></span>
+            <span class="stat-value">${stat.usl.toFixed(0)}</span>
         </div>
         <div class="stat-row">
-            <span class="stat-label">USL</span>
-            <span class="stat-value">${usl.toFixed(0)}</span>
+            <span class="stat-label">LSL <small>(µ−6σ)</small></span>
+            <span class="stat-value">${stat.lsl.toFixed(0)}</span>
         </div>
         <div class="stats-divider"></div>
         <div class="cpk-row">
-            <span class="cpk-label">Cpk</span>
-            <span class="cpk-value">${cpk.toFixed(12)}</span>
+            <span class="cpk-label">Cp</span>
+            <span class="cpk-value">${stat.cp.toFixed(12)}</span>
         </div>
-        <div class="status-badge" style="background:${s.bg};color:${s.color};box-shadow:0 4px 14px ${s.bg}55">
-            ${s.text}
+        <div class="cpk-row">
+            <span class="cpk-label">Cpk</span>
+            <span class="cpk-value">${stat.cpk.toFixed(12)}</span>
+        </div>
+        <div class="status-badge"
+             style="background:${s.bg};color:${s.color};box-shadow:0 4px 14px ${s.bg}55">
+            ${CPK.getCpkStatus(stat.cpk).label}
         </div>`;
 
-    // Also update the chart badge
     if (badgeId) {
         const badge = document.getElementById(badgeId);
         if (badge) {
-            badge.textContent = s.text;
-            badge.style.background = s.bg + '22';
-            badge.style.color      = s.bg;
-            badge.style.border     = `1px solid ${s.bg}44`;
+            const st = CPK.getCpkStatus(stat.cpk);
+            badge.textContent        = st.label;
+            badge.style.background   = s.bg + '22';
+            badge.style.color        = s.bg;
+            badge.style.border       = `1px solid ${s.bg}44`;
         }
     }
 }
@@ -137,28 +223,42 @@ function renderLegend() {
         ${rows.map(r => `
             <div class="legend-item">
                 <span class="legend-threshold">${r.t}</span>
-                <span class="legend-badge" style="background:${r.bg}22;color:${r.bg};border:1px solid ${r.bg}44">${r.l}</span>
+                <span class="legend-badge"
+                      style="background:${r.bg}22;color:${r.bg};border:1px solid ${r.bg}44">
+                    ${r.l}
+                </span>
             </div>`).join('')}`;
 }
 
 // ── Charts ────────────────────────────────────────────────────────────────────
-function renderCharts(data) {
-    const lim = limits[selectedMag];
-    buildChart('chart-x', data.map(d => d.x), lim.xLSL, lim.xUSL, 'X');
-    buildChart('chart-y', data.map(d => d.y), lim.yLSL, lim.yUSL, 'Y');
+function renderCharts(result) {
+    buildChart(`chart-x`, result.x.x ?? result.magnification,
+               result.x, 'X', result.magnification);
+    buildChart(`chart-y`, result.y.x ?? result.magnification,
+               result.y, 'Y', result.magnification);
 }
 
-function buildChart(id, values, lsl, usl, axis) {
-    if (axis === 'X' && chartX) { chartX.destroy(); chartX = null; }
-    if (axis === 'Y' && chartY) { chartY.destroy(); chartY = null; }
+function buildChart(canvasId, _unused, stat, axis, mag) {
+    // Destruir instancia anterior si existe
+    const key = `${mag}-${axis}`;
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 
-    const mean    = values.reduce((a,b) => a+b, 0) / Math.max(1, values.length);
-    const minV    = Math.min(...values, lsl);
-    const maxV    = Math.max(...values, usl);
-    const pad     = (maxV - minV) * 0.2;
-    const ctx     = document.getElementById(id).getContext('2d');
+    // Reconstruir values a partir del stat — necesitamos los raw values
+    // Los almacenamos al procesar para poder graficarlos
+    const result = cpkResults.find(r => r.magnification === mag);
+    if (!result) return;
 
-    const inst = new Chart(ctx, {
+    const values = axis === 'X' ? result._xRaw : result._yRaw;
+    if (!values || !values.length) return;
+
+    const { usl, lsl, mu: mean } = stat;
+    const minV = Math.min(...values, lsl);
+    const maxV = Math.max(...values, usl);
+    const pad  = (maxV - minV) * 0.2;
+    const ctx  = document.getElementById(canvasId);
+    if (!ctx) return;
+
+    const inst = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
             labels: values.map((_, i) => i + 1),
@@ -217,7 +317,7 @@ function buildChart(id, values, lsl, usl, axis) {
                 },
                 annotation: {
                     annotations: {
-                        usl: {
+                        uslLine: {
                             type: 'line', yMin: usl, yMax: usl,
                             borderColor: D.uslColor, borderWidth: 1.5, borderDash: [5,5],
                             label: { display: true, content: `USL: ${usl.toFixed(0)}`,
@@ -225,7 +325,7 @@ function buildChart(id, values, lsl, usl, axis) {
                                 color: D.annText, font: { size: 11, weight: 'bold' },
                                 padding: D.annPad, borderRadius: D.annRad }
                         },
-                        lsl: {
+                        lslLine: {
                             type: 'line', yMin: lsl, yMax: lsl,
                             borderColor: D.uslColor, borderWidth: 1.5, borderDash: [5,5],
                             label: { display: true, content: `LSL: ${lsl.toFixed(0)}`,
@@ -233,7 +333,7 @@ function buildChart(id, values, lsl, usl, axis) {
                                 color: D.annText, font: { size: 11, weight: 'bold' },
                                 padding: D.annPad, borderRadius: D.annRad }
                         },
-                        mean: {
+                        meanLine: {
                             type: 'line', yMin: mean, yMax: mean,
                             borderColor: '#30d158', borderWidth: 2,
                             label: { display: true, content: `Mean: ${mean.toFixed(0)}`,
@@ -247,37 +347,25 @@ function buildChart(id, values, lsl, usl, axis) {
         }
     });
 
-    if (axis === 'X') chartX = inst;
-    else              chartY = inst;
+    charts[key] = inst;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  MODAL HELPERS
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Modal PDF ─────────────────────────────────────────────────────────────────
 function openPDFModal() {
-    // Pre-fill date with today
     const dateInput = document.getElementById('fi-date');
-    if (!dateInput.value) {
-        const today = new Date();
-        dateInput.value = today.toISOString().slice(0, 10);
-    }
+    if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
     document.getElementById('pdf-modal').style.display = 'flex';
     setTimeout(() => document.getElementById('fi-customer').focus(), 60);
 }
-
 function closePDFModal() {
     document.getElementById('pdf-modal').style.display = 'none';
 }
-
 function handleOverlayClick(e) {
     if (e.target.id === 'pdf-modal') closePDFModal();
 }
-
 function exportPDF() { openPDFModal(); }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  LOADING
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Loading ───────────────────────────────────────────────────────────────────
 function showLoading(msg = 'Cargando…') {
     document.getElementById('loading-text').textContent = msg;
     document.getElementById('loading-overlay').style.display = 'flex';
@@ -286,20 +374,14 @@ function hideLoading() {
     document.getElementById('loading-overlay').style.display = 'none';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  PDF GENERATION — renders a report in a new window and triggers print
-// ══════════════════════════════════════════════════════════════════════════════
-
-/** Render a Chart.js chart off-screen (light theme) and return PNG data-URL */
-function buildLightChartPNG(values, lsl, usl, axisLabel) {
+// ── PDF: render chart light-theme ─────────────────────────────────────────────
+function buildLightChartPNG(values, lsl, usl, mean, axisLabel) {
     return new Promise(resolve => {
         const canvas = document.createElement('canvas');
-        canvas.width  = 900;
-        canvas.height = 300;
+        canvas.width = 900; canvas.height = 300;
         Object.assign(canvas.style, { position:'fixed', top:'-9999px', left:'-9999px' });
         document.body.appendChild(canvas);
 
-        const mean = values.reduce((a,b) => a+b,0) / Math.max(1, values.length);
         const minV = Math.min(...values, lsl);
         const maxV = Math.max(...values, usl);
         const pad  = (maxV - minV) * 0.2;
@@ -332,7 +414,7 @@ function buildLightChartPNG(values, lsl, usl, axisLabel) {
                     x: {
                         grid:  { color: '#f5f5f5' },
                         ticks: { color: '#555', font: { size: 10 } },
-                        title: { display: true, text: axisLabel, font: { size: 11 }, color: '#666' }
+                        title: { display: true, text: axisLabel, font:{size:11}, color:'#666' }
                     }
                 },
                 plugins: {
@@ -360,12 +442,10 @@ function buildLightChartPNG(values, lsl, usl, axisLabel) {
             }
         });
 
-        // Wait 3 frames for Chart.js to finish drawing
         requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
             const off = document.createElement('canvas');
-            off.width  = canvas.width;
-            off.height = canvas.height;
-            const ctx  = off.getContext('2d');
+            off.width = canvas.width; off.height = canvas.height;
+            const ctx = off.getContext('2d');
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, off.width, off.height);
             ctx.drawImage(canvas, 0, 0);
@@ -377,268 +457,12 @@ function buildLightChartPNG(values, lsl, usl, axisLabel) {
     });
 }
 
-/** Escape HTML entities for safe embedding */
 function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
-                          .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-/** Convert a hex color to CSS rgba with given alpha for the PDF table */
-function hexAlpha(hex, a) {
-    const r = parseInt(hex.slice(1,3),16);
-    const g = parseInt(hex.slice(3,5),16);
-    const b = parseInt(hex.slice(5,7),16);
-    return `rgba(${r},${g},${b},${a})`;
-}
-
-/** Human-readable names matching the report image */
-function magName(mag) {
-    return { 'High Mag (M11)': 'High Magnification (M11)',
-             'Low Mag (M15)' : 'Low Magnification (M15)',
-             'Low Mag (M19)' : 'Low Magnification (M19)' }[mag] || mag;
-}
-
-/** Build the complete report HTML document */
-function buildReportHTML(info, charts, logoDataURL) {
-    const magList = ['High Mag (M11)', 'Low Mag (M15)', 'Low Mag (M19)'];
-
-    // ── Status colors — matches original Mac app reference exactly
-    const STATUS_LIGHT = {
-        Excellent:  { bg:'#22c55e', text:'#fff' },   // bright green
-        Optimal:    { bg:'#67e8f9', text:'#0e7490' }, // cyan tint, dark cyan text
-        Good:       { bg:'#bbf7d0', text:'#166534' }, // light green tint
-        Acceptable: { bg:'#fde047', text:'#713f12' }, // yellow
-        Bad:        { bg:'#f97316', text:'#fff' },    // orange
-        Terrible:   { bg:'#dc2626', text:'#fff' },    // red
-    };
-
-    // ── Build stats for a mag type (returns {xSt, ySt, xCpk, yCpk})
-    function magStats(mag) {
-        const data  = allLogData.filter(d => d.magType === mag);
-        const lim   = limits[mag];
-        const xVals = data.map(d => d.x);
-        const yVals = data.map(d => d.y);
-        const xSt   = calcStats(xVals);
-        const ySt   = calcStats(yVals);
-        const xCpk  = calcCPK(xSt.mean, xSt.stdDev, lim.xLSL, lim.xUSL);
-        const yCpk  = calcCPK(ySt.mean, ySt.stdDev, lim.yLSL, lim.yUSL);
-        const nd    = data.length === 0;
-        const fmt   = (v, d=0) => nd ? 'N/A' : Number(v).toFixed(d);
-        const stBadge = (cpkVal) => {
-            if (nd) return '<td colspan="1">—</td>';
-            const s   = getStatus(cpkVal);
-            const sc  = STATUS_LIGHT[s.text] || { bg: s.bg, text: s.color };
-            // Use background-image gradient instead of background-color:
-            // Chrome strips background-color when saving as PDF but respects background-image
-            return `<td class="badge-cell" style="background-image:linear-gradient(${sc.bg},${sc.bg});color:${sc.text}">${s.text}</td>`;
-        };
-        return { xSt, ySt, xCpk, yCpk, lim, nd, fmt, stBadge };
-    }
-
-    // ── Mag section rows HTML
-    const magSections = magList.map(mag => {
-        const { xSt, ySt, xCpk, yCpk, lim, nd, fmt, stBadge } = magStats(mag);
-        return `
-        <div class="mag-section">
-          <div class="mag-title">${magName(mag)}</div>
-          <table class="stats-table">
-            <thead>
-              <tr>
-                <th class="lbl-col"></th>
-                <th colspan="2" class="axis-head">X-ray Spot (X)</th>
-                <th colspan="2" class="axis-head">X-ray Spot (Y)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="row-lbl">Standard Deviation</td>
-                <td colspan="2" class="val">${fmt(xSt.stdDev, 4)}</td>
-                <td colspan="2" class="val">${fmt(ySt.stdDev, 4)}</td>
-              </tr>
-              <tr>
-                <td class="row-lbl">Mean</td>
-                <td colspan="2" class="val">${fmt(xSt.mean)}</td>
-                <td colspan="2" class="val">${fmt(ySt.mean)}</td>
-              </tr>
-              <tr>
-                <td class="row-lbl">USL</td>
-                <td colspan="2" class="val">${nd ? 'N/A' : lim.xUSL.toFixed(0)}</td>
-                <td colspan="2" class="val">${nd ? 'N/A' : lim.yUSL.toFixed(0)}</td>
-              </tr>
-              <tr>
-                <td class="row-lbl">LSL</td>
-                <td colspan="2" class="val">${nd ? 'N/A' : lim.xLSL.toFixed(0)}</td>
-                <td colspan="2" class="val">${nd ? 'N/A' : lim.yLSL.toFixed(0)}</td>
-              </tr>
-              <tr>
-                <td class="row-lbl">Cp</td>
-                <td class="val mono">${fmt(xCpk.cp, 12)}</td>
-                ${stBadge(xCpk.cp)}
-                <td class="val mono">${fmt(yCpk.cp, 12)}</td>
-                ${stBadge(yCpk.cp)}
-              </tr>
-              <tr>
-                <td class="row-lbl">Cpk</td>
-                <td class="val mono">${fmt(xCpk.cpk, 12)}</td>
-                ${stBadge(xCpk.cpk)}
-                <td class="val mono">${fmt(yCpk.cpk, 12)}</td>
-                ${stBadge(yCpk.cpk)}
-              </tr>
-            </tbody>
-          </table>
-        </div>`;
-    }).join('');
-
-    // ── Charts HTML
-    const chartsHTML = magList.map(mag => {
-        const c = charts[mag];
-        if (!c) return '';
-        return `
-        <div class="chart-block">
-          <div class="chart-block-title">${magName(mag)}</div>
-          <div class="chart-row">
-            <div class="chart-col">
-              <p class="chart-lbl">X-ray Spot (X)</p>
-              <img src="${c.x}" class="chart-img" alt="Chart X">
-            </div>
-            <div class="chart-col">
-              <p class="chart-lbl">X-ray Spot (Y)</p>
-              <img src="${c.y}" class="chart-img" alt="Chart Y">
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-
-    const logoTag = logoDataURL
-        ? `<img src="${logoDataURL}" class="rep-logo" alt="Logo">`
-        : `<div class="rep-logo-text">SMT</div>`;
-
-    // Format date
-    const dateObj = info.date ? new Date(info.date + 'T12:00:00') : new Date();
-    const dateStr = dateObj.toLocaleDateString('es-MX',
-        { day:'2-digit', month:'2-digit', year:'numeric' });
-
-    return `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<title>CPK VITROX Report — ${esc(info.customer)}</title>
-<style>
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  /* CRITICAL: force browser to print background colors */
-  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important;}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#111;background:#fff;}
-  @page{margin:14mm 16mm;size:A4;}
-
-  /* ── HEADER ── */
-  .rep-header{display:flex;justify-content:space-between;align-items:flex-start;
-    padding-bottom:10px;border-bottom:2.5px solid #111;margin-bottom:12px;}
-  .rep-logo{height:44px;object-fit:contain;}
-  .rep-logo-text{font-size:20px;font-weight:900;color:#1e40af;
-    border:2.5px solid #1e40af;padding:3px 10px;border-radius:4px;}
-  .rep-header-right{text-align:right;}
-  .rep-title{font-size:20pt;font-weight:900;letter-spacing:-.02em;color:#111;}
-  .rep-meta{margin-top:6px;display:flex;flex-direction:column;gap:2px;align-items:flex-end;}
-  .rep-meta-row{font-size:9pt;color:#444;}
-  .rep-meta-row strong{color:#111;}
-
-  /* ── CUSTOMER TABLE ── */
-  .info-table{border-collapse:collapse;margin-bottom:14px;}
-  .info-table td{padding:4px 10px;border:1px solid #ccc;font-size:9.5pt;}
-  .info-table td:first-child{background-image:linear-gradient(#f0f0f0,#f0f0f0);font-weight:700;width:115px;color:#222;}
-
-  /* ── MAG SECTIONS ── */
-  .mag-section{margin-bottom:12px;page-break-inside:avoid;}
-  .mag-title{text-align:center;font-size:13pt;font-weight:800;
-    border:1.5px solid #222;padding:5px;background-image:linear-gradient(#f0f0f0,#f0f0f0);letter-spacing:-.01em;}
-  .stats-table{width:100%;border-collapse:collapse;font-size:8.5pt;}
-  .stats-table th{background-image:linear-gradient(#e8e8e8,#e8e8e8);border:1px solid #ccc;padding:4px 8px;
-    text-align:center;font-size:9pt;font-weight:700;}
-  .axis-head{background-image:linear-gradient(#dde8f0,#dde8f0);}
-  .lbl-col{width:105px;}
-  .stats-table td{border:1px solid #d4d4d4;padding:3.5px 8px;}
-  .row-lbl{text-align:right;background-image:linear-gradient(#f7f7f7,#f7f7f7);font-size:8.5pt;color:#333;}
-  .val{text-align:right;font-variant-numeric:tabular-nums;}
-  .mono{font-family:'Courier New',monospace;font-size:8pt;}
-  .badge-cell{text-align:center;font-weight:700;font-size:8pt;letter-spacing:.03em;width:68px;}
-
-  /* ── CRITERIA TABLE ── */
-  .criteria-wrap{margin-top:12px;page-break-inside:avoid;}
-  .criteria-title{font-size:9pt;font-weight:700;margin-bottom:4px;color:#444;text-transform:uppercase;letter-spacing:.05em;}
-  .criteria-table{border-collapse:collapse;}
-  .criteria-table td{border:1px solid #ccc;padding:3px 10px;font-size:9pt;}
-  .criteria-table td:first-child{background-image:linear-gradient(#f7f7f7,#f7f7f7);width:140px;}
-  .criteria-table td:last-child{font-weight:700;text-align:center;width:80px;}
-
-  /* ── CHARTS PAGE ── */
-  .charts-page{page-break-before:always;}
-  .charts-page-title{text-align:center;font-size:16pt;font-weight:800;
-    padding:8px;border-bottom:2px solid #111;margin-bottom:16px;}
-  .chart-block{margin-bottom:20px;page-break-inside:avoid;}
-  .chart-block-title{font-size:11pt;font-weight:700;background:#f0f0f0;
-    border:1px solid #ddd;padding:5px 10px;text-align:center;margin-bottom:8px;}
-  .chart-row{display:flex;gap:12px;}
-  .chart-col{flex:1;}
-  .chart-lbl{font-size:8.5pt;color:#666;margin-bottom:4px;font-style:italic;}
-  .chart-img{width:100%;height:auto;border:1px solid #e5e5e5;border-radius:3px;}
-
-  /* ── FOOTER ── */
-  .rep-footer{position:fixed;bottom:8mm;left:0;right:0;text-align:center;
-    font-size:8pt;color:#999;border-top:1px solid #ddd;padding-top:4px;}
-</style>
-</head>
-<body>
-
-<!-- HEADER -->
-<div class="rep-header">
-  <div>${logoTag}</div>
-  <div class="rep-header-right">
-    <div class="rep-title">CPK VITROX Report</div>
-    <div class="rep-meta">
-      <div class="rep-meta-row"><strong>Date:</strong> ${dateStr}</div>
-      <div class="rep-meta-row"><strong>Customer:</strong> ${esc(info.customer) || '—'}</div>
-      <div class="rep-meta-row"><strong>S/N:</strong> ${esc(info.serial) || '—'}</div>
-    </div>
-  </div>
-</div>
-
-<!-- CUSTOMER INFO -->
-<table class="info-table">
-  <tr><td>Customer Info.</td><td>${esc(info.customer)}</td></tr>
-  <tr><td>Machine Model</td><td>${esc(info.model)}</td></tr>
-  <tr><td>System S/N</td><td>${esc(info.serial)}</td></tr>
-  <tr><td>SMTo Engineer</td><td>${esc(info.engineer)}</td></tr>
-</table>
-
-<!-- MAG SECTIONS -->
-${magSections}
-
-<!-- CPK CRITERIA -->
-<div class="criteria-wrap">
-  <div class="criteria-title">CPK Reference</div>
-  <table class="criteria-table">
-    <tr><td>CPK &gt;= 2.0</td>           <td style="background-image:linear-gradient(#22c55e,#22c55e);color:#fff;font-weight:700">Excellent</td></tr>
-    <tr><td>2.0 &gt; CPK &gt;= 1.67</td> <td style="background-image:linear-gradient(#67e8f9,#67e8f9);color:#0e7490;font-weight:700">Optimal</td></tr>
-    <tr><td>1.67 &gt; CPK &gt;= 1.33</td><td style="background-image:linear-gradient(#bbf7d0,#bbf7d0);color:#166534;font-weight:700">Good</td></tr>
-    <tr><td>1.33 &gt; CPK &gt;= 1.0</td> <td style="background-image:linear-gradient(#fde047,#fde047);color:#713f12;font-weight:700">Acceptable</td></tr>
-    <tr><td>1.0 &gt; CPK &gt;= 0.67</td> <td style="background-image:linear-gradient(#f97316,#f97316);color:#fff;font-weight:700">Bad</td></tr>
-    <tr><td>0.67 &gt; CPK</td>           <td style="background-image:linear-gradient(#dc2626,#dc2626);color:#fff;font-weight:700">Terrible</td></tr>
-  </table>
-</div>
-
-<!-- CHARTS PAGE -->
-<div class="charts-page">
-  <div class="charts-page-title">Process Charts</div>
-  ${chartsHTML}
-</div>
-
-<div class="rep-footer">CPK VITROX — ${esc(info.customer) || 'Report'} — ${dateStr}</div>
-
-</body>
-</html>`;
-}
-
-// ── Main PDF entry point ──────────────────────────────────────────────────────
+// ── PDF: generar reporte completo ─────────────────────────────────────────────
 async function generatePDF() {
     closePDFModal();
 
@@ -652,27 +476,23 @@ async function generatePDF() {
 
     showLoading('Renderizando gráficas…');
 
-    // Build light-theme chart PNGs for all mag types that have data
-    const charts   = {};
-    const magList  = ['High Mag (M11)', 'Low Mag (M15)', 'Low Mag (M19)'];
-    for (const mag of magList) {
-        const data = allLogData.filter(d => d.magType === mag);
-        if (data.length === 0) continue;
-        const lim = limits[mag];
-        charts[mag] = {
-            x: await buildLightChartPNG(data.map(d => d.x), lim.xLSL, lim.xUSL, 'X-ray Spot (X)'),
-            y: await buildLightChartPNG(data.map(d => d.y), lim.yLSL, lim.yUSL, 'X-ray Spot (Y)')
+    // Construir PNGs para cada magnificación presente
+    const pngMap = {};
+    for (const r of cpkResults) {
+        if (!r._xRaw || !r._yRaw) continue;
+        pngMap[r.magnification] = {
+            x: await buildLightChartPNG(r._xRaw, r.x.lsl, r.x.usl, r.x.mu, 'X-ray Spot (X)'),
+            y: await buildLightChartPNG(r._yRaw, r.y.lsl, r.y.usl, r.y.mu, 'X-ray Spot (Y)')
         };
     }
 
-    // Get logo as data URL
+    // Logo
     let logoDataURL = null;
     const logoEl = document.getElementById('smt-logo');
     if (logoEl && logoEl.complete && logoEl.naturalWidth > 0) {
         try {
             const lc = document.createElement('canvas');
-            lc.width  = logoEl.naturalWidth;
-            lc.height = logoEl.naturalHeight;
+            lc.width = logoEl.naturalWidth; lc.height = logoEl.naturalHeight;
             lc.getContext('2d').drawImage(logoEl, 0, 0);
             logoDataURL = lc.toDataURL('image/png');
         } catch(_) {}
@@ -680,8 +500,8 @@ async function generatePDF() {
 
     showLoading('Abriendo reporte…');
 
-    const html    = buildReportHTML(info, charts, logoDataURL);
-    const repWin  = window.open('', '_blank', 'width=900,height=750,menubar=no,toolbar=no');
+    const html   = buildReportHTML(info, pngMap, logoDataURL);
+    const repWin = window.open('', '_blank', 'width=900,height=750,menubar=no,toolbar=no');
 
     if (!repWin) {
         hideLoading();
@@ -692,22 +512,212 @@ async function generatePDF() {
     repWin.document.open();
     repWin.document.write(html);
     repWin.document.close();
-
     hideLoading();
 
-    // Wait for images to load then trigger print
-    repWin.onload = () => {
-        setTimeout(() => {
-            repWin.focus();
-            repWin.print();
-        }, 400);
+    repWin.onload = () => setTimeout(() => { repWin.focus(); repWin.print(); }, 400);
+    setTimeout(() => { if (repWin && !repWin.closed) { repWin.focus(); repWin.print(); }}, 1500);
+}
+
+// ── PDF: HTML del reporte ─────────────────────────────────────────────────────
+function buildReportHTML(info, pngMap, logoDataURL) {
+
+    const STATUS_LIGHT = {
+        'Excellent':  { bg:'#22c55e', text:'#fff' },
+        'Optimal':    { bg:'#67e8f9', text:'#0e7490' },
+        'Good':       { bg:'#bbf7d0', text:'#166534' },
+        'Acceptable': { bg:'#fde047', text:'#713f12' },
+        'Bad':        { bg:'#f97316', text:'#fff' },
+        'Terrible':   { bg:'#dc2626', text:'#fff' },
+        'N/A':        { bg:'#e5e7eb', text:'#374151' },
     };
 
-    // Fallback if onload doesn't fire
-    setTimeout(() => {
-        if (repWin && !repWin.closed) {
-            repWin.focus();
-            repWin.print();
-        }
-    }, 1500);
+    function stBadge(cpkVal) {
+        const st = CPK.getCpkStatus(cpkVal);
+        const sc = STATUS_LIGHT[st.label] || STATUS_LIGHT['N/A'];
+        return `<td class="badge-cell"
+                    style="background-image:linear-gradient(${sc.bg},${sc.bg});color:${sc.text}">
+                    ${st.label}
+                </td>`;
+    }
+
+    // Secciones por magnificación
+    const magSections = cpkResults.map(r => {
+        const nd  = !r.x || !r.y;
+        const fmt = (v, d=0) => nd ? 'N/A' : Number(v).toFixed(d);
+        return `
+        <div class="mag-section">
+          <div class="mag-title">${r.label}</div>
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th class="lbl-col"></th>
+                <th colspan="2" class="axis-head">X-ray Spot (X)</th>
+                <th colspan="2" class="axis-head">X-ray Spot (Y)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-lbl">Std Deviation</td>
+                <td colspan="2" class="val">${fmt(r.x.sigma, 4)}</td>
+                <td colspan="2" class="val">${fmt(r.y.sigma, 4)}</td>
+              </tr>
+              <tr>
+                <td class="row-lbl">Mean</td>
+                <td colspan="2" class="val">${fmt(r.x.mu)}</td>
+                <td colspan="2" class="val">${fmt(r.y.mu)}</td>
+              </tr>
+              <tr>
+                <td class="row-lbl">USL (µ+6σ)</td>
+                <td colspan="2" class="val">${fmt(r.x.usl)}</td>
+                <td colspan="2" class="val">${fmt(r.y.usl)}</td>
+              </tr>
+              <tr>
+                <td class="row-lbl">LSL (µ−6σ)</td>
+                <td colspan="2" class="val">${fmt(r.x.lsl)}</td>
+                <td colspan="2" class="val">${fmt(r.y.lsl)}</td>
+              </tr>
+              <tr>
+                <td class="row-lbl">Cp</td>
+                <td class="val mono">${fmt(r.x.cp, 12)}</td>
+                ${stBadge(r.x.cp)}
+                <td class="val mono">${fmt(r.y.cp, 12)}</td>
+                ${stBadge(r.y.cp)}
+              </tr>
+              <tr>
+                <td class="row-lbl">Cpk</td>
+                <td class="val mono">${fmt(r.x.cpk, 12)}</td>
+                ${stBadge(r.x.cpk)}
+                <td class="val mono">${fmt(r.y.cpk, 12)}</td>
+                ${stBadge(r.y.cpk)}
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    // Sección de gráficas
+    const chartsHTML = cpkResults.map(r => {
+        const p = pngMap[r.magnification];
+        if (!p) return '';
+        return `
+        <div class="chart-block">
+          <div class="chart-block-title">${r.label}</div>
+          <div class="chart-row">
+            <div class="chart-col">
+              <p class="chart-lbl">X-ray Spot (X)</p>
+              <img src="${p.x}" class="chart-img" alt="Chart X">
+            </div>
+            <div class="chart-col">
+              <p class="chart-lbl">X-ray Spot (Y)</p>
+              <img src="${p.y}" class="chart-img" alt="Chart Y">
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    const logoTag = logoDataURL
+        ? `<img src="${logoDataURL}" class="rep-logo" alt="Logo">`
+        : `<div class="rep-logo-text">SMT</div>`;
+
+    const dateStr = info.date
+        ? new Date(info.date + 'T12:00:00').toLocaleDateString('es-MX',
+            { day:'2-digit', month:'2-digit', year:'numeric' })
+        : new Date().toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+    return `<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8">
+<title>CPK VITROX Report — ${esc(info.customer)}</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#111;background:#fff}
+  @page{margin:14mm 16mm;size:A4}
+  .rep-header{display:flex;justify-content:space-between;align-items:flex-start;
+    padding-bottom:10px;border-bottom:2.5px solid #111;margin-bottom:12px}
+  .rep-logo{height:44px;object-fit:contain}
+  .rep-logo-text{font-size:20px;font-weight:900;color:#1e40af;
+    border:2.5px solid #1e40af;padding:3px 10px;border-radius:4px}
+  .rep-title{font-size:20pt;font-weight:900;letter-spacing:-.02em;color:#111}
+  .rep-meta{margin-top:6px;display:flex;flex-direction:column;gap:2px;align-items:flex-end}
+  .rep-meta-row{font-size:9pt;color:#444}
+  .rep-meta-row strong{color:#111}
+  .info-table{border-collapse:collapse;margin-bottom:14px}
+  .info-table td{padding:4px 10px;border:1px solid #ccc;font-size:9.5pt}
+  .info-table td:first-child{background-image:linear-gradient(#f0f0f0,#f0f0f0);font-weight:700;width:115px;color:#222}
+  .mag-section{margin-bottom:12px;page-break-inside:avoid}
+  .mag-title{text-align:center;font-size:13pt;font-weight:800;
+    border:1.5px solid #222;padding:5px;background-image:linear-gradient(#f0f0f0,#f0f0f0)}
+  .stats-table{width:100%;border-collapse:collapse;font-size:8.5pt}
+  .stats-table th{background-image:linear-gradient(#e8e8e8,#e8e8e8);border:1px solid #ccc;
+    padding:4px 8px;text-align:center;font-size:9pt;font-weight:700}
+  .axis-head{background-image:linear-gradient(#dde8f0,#dde8f0)}
+  .lbl-col{width:105px}
+  .stats-table td{border:1px solid #d4d4d4;padding:3.5px 8px}
+  .row-lbl{text-align:right;background-image:linear-gradient(#f7f7f7,#f7f7f7);font-size:8.5pt;color:#333}
+  .val{text-align:right;font-variant-numeric:tabular-nums}
+  .mono{font-family:'Courier New',monospace;font-size:8pt}
+  .badge-cell{text-align:center;font-weight:700;font-size:8pt;letter-spacing:.03em;width:68px}
+  .criteria-wrap{margin-top:12px;page-break-inside:avoid}
+  .criteria-title{font-size:9pt;font-weight:700;margin-bottom:4px;color:#444;
+    text-transform:uppercase;letter-spacing:.05em}
+  .criteria-table{border-collapse:collapse}
+  .criteria-table td{border:1px solid #ccc;padding:3px 10px;font-size:9pt}
+  .criteria-table td:first-child{background-image:linear-gradient(#f7f7f7,#f7f7f7);width:140px}
+  .criteria-table td:last-child{font-weight:700;text-align:center;width:80px}
+  .charts-page{page-break-before:always}
+  .charts-page-title{text-align:center;font-size:16pt;font-weight:800;
+    padding:8px;border-bottom:2px solid #111;margin-bottom:16px}
+  .chart-block{margin-bottom:20px;page-break-inside:avoid}
+  .chart-block-title{font-size:11pt;font-weight:700;background:#f0f0f0;
+    border:1px solid #ddd;padding:5px 10px;text-align:center;margin-bottom:8px}
+  .chart-row{display:flex;gap:12px}
+  .chart-col{flex:1}
+  .chart-lbl{font-size:8.5pt;color:#666;margin-bottom:4px;font-style:italic}
+  .chart-img{width:100%;height:auto;border:1px solid #e5e5e5;border-radius:3px}
+  .rep-footer{position:fixed;bottom:8mm;left:0;right:0;text-align:center;
+    font-size:8pt;color:#999;border-top:1px solid #ddd;padding-top:4px}
+</style>
+</head><body>
+
+<div class="rep-header">
+  <div>${logoTag}</div>
+  <div style="text-align:right">
+    <div class="rep-title">CPK VITROX Report</div>
+    <div class="rep-meta">
+      <div class="rep-meta-row"><strong>Date:</strong> ${dateStr}</div>
+      <div class="rep-meta-row"><strong>Customer:</strong> ${esc(info.customer)||'—'}</div>
+      <div class="rep-meta-row"><strong>S/N:</strong> ${esc(info.serial)||'—'}</div>
+    </div>
+  </div>
+</div>
+
+<table class="info-table">
+  <tr><td>Customer Info.</td><td>${esc(info.customer)}</td></tr>
+  <tr><td>Machine Model</td><td>${esc(info.model)}</td></tr>
+  <tr><td>System S/N</td><td>${esc(info.serial)}</td></tr>
+  <tr><td>SMTo Engineer</td><td>${esc(info.engineer)}</td></tr>
+</table>
+
+${magSections}
+
+<div class="criteria-wrap">
+  <div class="criteria-title">CPK Reference</div>
+  <table class="criteria-table">
+    <tr><td>CPK &gt;= 2.0</td>           <td style="background-image:linear-gradient(#22c55e,#22c55e);color:#fff">Excellent</td></tr>
+    <tr><td>2.0 &gt; CPK &gt;= 1.67</td> <td style="background-image:linear-gradient(#67e8f9,#67e8f9);color:#0e7490">Optimal</td></tr>
+    <tr><td>1.67 &gt; CPK &gt;= 1.33</td><td style="background-image:linear-gradient(#bbf7d0,#bbf7d0);color:#166534">Good</td></tr>
+    <tr><td>1.33 &gt; CPK &gt;= 1.0</td> <td style="background-image:linear-gradient(#fde047,#fde047);color:#713f12">Acceptable</td></tr>
+    <tr><td>1.0 &gt; CPK &gt;= 0.67</td> <td style="background-image:linear-gradient(#f97316,#f97316);color:#fff">Bad</td></tr>
+    <tr><td>0.67 &gt; CPK</td>           <td style="background-image:linear-gradient(#dc2626,#dc2626);color:#fff">Terrible</td></tr>
+  </table>
+</div>
+
+<div class="charts-page">
+  <div class="charts-page-title">Process Charts</div>
+  ${chartsHTML}
+</div>
+
+<div class="rep-footer">CPK VITROX — ${esc(info.customer)||'Report'} — ${dateStr}</div>
+</body></html>`;
 }
