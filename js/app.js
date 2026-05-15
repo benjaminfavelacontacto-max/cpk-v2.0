@@ -665,8 +665,16 @@ async function generatePDF() {
     repWin.document.close();
     hideLoading();
 
-    repWin.onload = () => setTimeout(() => { repWin.focus(); repWin.print(); }, 400);
-    setTimeout(() => { if (repWin && !repWin.closed) { repWin.focus(); repWin.print(); }}, 1500);
+    // Imprimir SOLO UNA VEZ — el fallback solo dispara si onload no llegó
+    let printed = false;
+    const triggerPrint = () => {
+        if (printed || !repWin || repWin.closed) return;
+        printed = true;
+        repWin.focus();
+        repWin.print();
+    };
+    repWin.onload = () => setTimeout(triggerPrint, 400);
+    setTimeout(triggerPrint, 1500);
 }
 
 // ── PDF: HTML del reporte ─────────────────────────────────────────────────────
