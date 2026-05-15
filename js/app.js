@@ -43,38 +43,170 @@ function fmtNum(value, decimals = 0) {
     return Number(value).toFixed(decimals);
 }
 
-// ── Carga de archivos ─────────────────────────────────────────────────────────
+// ── Carga de archivos (multi-fase animada) ────────────────────────────
 document.getElementById('folder-input').addEventListener('change', async e => {
     const files = e.target.files;
     if (!files || !files.length) return;
 
-    showLoading('Cargando logs…');
+    await loadFilesWithUI(Array.from(files));
+    e.target.value = '';
+});
+
+// Sleep helper para dar tiempo de render entre fases
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function loadFilesWithUI(files) {
+    showFileLoader();
+    setLoaderPhase('scanning', {
+        title:    'Analizando carpeta',
+        subtitle: `Detectados ${files.length} archivos · Buscando .log`
+    });
+    setLoaderProgress(0, files.length);
+    await sleep(500);
+
+    // Filtrar solo .log
+    const logFiles = files.filter(f => f.name.toLowerCase().endsWith('.log'));
+    const nonLogCount = files.length - logFiles.length;
+
+    if (logFiles.length === 0) {
+        setLoaderPhase('error', {
+            title:    'No se encontraron logs',
+            subtitle: 'La carpeta seleccionada no contiene archivos .log válidos'
+        });
+        await sleep(2000);
+        hideFileLoader();
+        return;
+    }
+
+    // Fase: PROCESSING
+    setLoaderPhase('processing', {
+        title:    'Procesando logs',
+        subtitle: `Leyendo ${logFiles.length} archivos`
+    });
 
     const fileList = [];
-    // Lectura robusta: si un archivo falla, lo saltamos en lugar de romper todo
-    for (const f of files) {
-        if (!f.name.toLowerCase().endsWith('.log')) continue;
+    let loaded  = 0;
+    let skipped = nonLogCount;
+
+    updateLoaderStats({ loaded, skipped, mags: 0, samples: 0 });
+
+    for (let i = 0; i < logFiles.length; i++) {
+        const f = logFiles[i];
         try {
             const content = await f.text();
             fileList.push({ filename: f.name, content });
+            loaded++;
         } catch (err) {
             console.warn(`[CPK] No se pudo leer ${f.name}:`, err);
+            skipped++;
         }
+
+        setLoaderProgress(i + 1, logFiles.length);
+        updateLoaderStats({ loaded, skipped, mags: 0, samples: 0 });
+        setLoaderActivity(f.name);
+
+        // Yield al navegador cada pocos archivos para que se vea la animación
+        if (i % 3 === 0) await sleep(15);
     }
+
+    // Fase: ANALYZING
+    setLoaderPhase('analyzing', {
+        title:    'Calculando capacidad',
+        subtitle: 'Detectando magnificaciones y aplicando ±6σ'
+    });
+    setLoaderActivity('—');
+    await sleep(500);
 
     rawFiles   = fileList;
     cpkResults = CPK.processLogFiles(fileList);
+    selectedMag = cpkResults.length > 0 ? cpkResults[0].magnification : null;
+
+    const totalSamples = cpkResults.reduce((s, r) => s + r.sampleCount, 0);
+
+    updateLoaderStats({ loaded, skipped, mags: cpkResults.length, samples: totalSamples });
+    await sleep(300);
+
+    // Fase: COMPLETE
+    setLoaderPhase('complete', {
+        title:    'Análisis Completo',
+        subtitle: `${cpkResults.length} magnificación${cpkResults.length === 1 ? '' : 'es'} · ${totalSamples} muestras procesadas`
+    });
 
     console.log(`[CPK] ${fileList.length} archivos leídos, ${cpkResults.length} magnificaciones detectadas:`,
                 cpkResults.map(r => `${r.label} (${r.sampleCount} muestras)`));
 
-    // Seleccionar la primera magnificación detectada por defecto
-    selectedMag = cpkResults.length > 0 ? cpkResults[0].magnification : null;
+    await sleep(1600);
 
-    e.target.value = '';
+    hideFileLoader();
     render();
-    hideLoading();
-});
+}
+
+// ── File Loader controls ──────────────────────────────────────────────
+function showFileLoader() {
+    const el = document.getElementById('file-loader');
+    el.classList.remove('is-closing', 'is-complete');
+    el.style.display = 'flex';
+    document.getElementById('fl-check').style.display = 'none';
+    document.getElementById('fl-check').classList.remove('is-drawn');
+}
+
+function hideFileLoader() {
+    const el = document.getElementById('file-loader');
+    el.classList.add('is-closing');
+    setTimeout(() => { el.style.display = 'none'; el.classList.remove('is-closing', 'is-complete'); }, 500);
+}
+
+function setLoaderPhase(phase, { title, subtitle }) {
+    const labelMap = {
+        scanning:   { phase: 'SCANNING',   status: 'ACTIVE'  },
+        processing: { phase: 'PROCESSING', status: 'READING' },
+        analyzing:  { phase: 'ANALYZING',  status: 'COMPUTE' },
+        complete:   { phase: 'COMPLETE',   status: 'SUCCESS' },
+        error:      { phase: 'ERROR',      status: 'FAILED'  },
+    };
+    const labels = labelMap[phase] || labelMap.scanning;
+
+    document.getElementById('fl-phase-label').textContent  = labels.phase;
+    document.getElementById('fl-status-label').textContent = labels.status;
+    document.getElementById('fl-title').textContent        = title;
+    document.getElementById('fl-subtitle').textContent     = subtitle;
+
+    const card = document.getElementById('file-loader');
+    if (phase === 'complete') {
+        card.classList.add('is-complete');
+        const check = document.getElementById('fl-check');
+        check.style.display = 'block';
+        // Forzar reflow para reiniciar la animación
+        check.getBoundingClientRect();
+        check.classList.add('is-drawn');
+    } else {
+        card.classList.remove('is-complete');
+    }
+}
+
+function setLoaderProgress(current, total) {
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    document.getElementById('fl-progress-fill').style.width = pct + '%';
+    document.getElementById('fl-count').textContent   = current;
+    document.getElementById('fl-total').textContent   = total;
+    document.getElementById('fl-percent').textContent = pct + '%';
+}
+
+function updateLoaderStats({ loaded, skipped, mags, samples }) {
+    document.getElementById('fl-stat-loaded').textContent  = loaded;
+    document.getElementById('fl-stat-skipped').textContent = skipped;
+    document.getElementById('fl-stat-mags').textContent    = mags;
+    document.getElementById('fl-stat-samples').textContent = samples;
+}
+
+function setLoaderActivity(filename) {
+    const el = document.getElementById('fl-activity-file');
+    el.style.opacity = '0';
+    setTimeout(() => {
+        el.textContent = filename || '—';
+        el.style.opacity = '1';
+    }, 100);
+}
 
 // ── Render principal ──────────────────────────────────────────────────────────
 function render() {
