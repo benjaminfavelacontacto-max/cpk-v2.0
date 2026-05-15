@@ -645,7 +645,7 @@ function buildReportHTML(info, pngMap, logoDataURL) {
     return `<!DOCTYPE html>
 <html lang="es"><head>
 <meta charset="UTF-8">
-<title>CPK VITROX Report — ${esc(info.customer)}</title>
+<title>CM/CMK VITROX Report — ${esc(info.customer)}</title>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
@@ -701,7 +701,7 @@ function buildReportHTML(info, pngMap, logoDataURL) {
 <div class="rep-header">
   <div>${logoTag}</div>
   <div style="text-align:right">
-    <div class="rep-title">CPK VITROX Report</div>
+    <div class="rep-title">CM/CMK VITROX Report</div>
     <div class="rep-meta">
       <div class="rep-meta-row"><strong>Date:</strong> ${dateStr}</div>
       <div class="rep-meta-row"><strong>Customer:</strong> ${esc(info.customer)||'—'}</div>
@@ -736,6 +736,6 @@ ${magSections}
   ${chartsHTML}
 </div>
 
-<div class="rep-footer">CPK VITROX — ${esc(info.customer)||'Report'} — ${dateStr}</div>
+<div class="rep-footer">CM/CMK VITROX — ${esc(info.customer)||'Report'} — ${dateStr}</div>
 </body></html>`;
 }
