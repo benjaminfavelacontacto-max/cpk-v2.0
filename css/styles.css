@@ -471,6 +471,40 @@ body {
 .form-field input::placeholder { color: rgba(142,142,147,.45); }
 input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.5); cursor: pointer; }
 
+/* Select dentro del modal — mismo look que los inputs */
+.form-select-wrap { position: relative; display: flex; align-items: center; }
+.form-select {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    padding: 10px 32px 10px 13px;
+    background: var(--bg-3);
+    border: 1px solid var(--sep-hard);
+    border-radius: var(--r-sm);
+    color: var(--t1);
+    font-size: 13.5px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    transition: border-color .18s, box-shadow .18s, background .18s;
+}
+.form-select:hover  { background: var(--bg-4); }
+.form-select:focus  {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px var(--blue-gl);
+    background: var(--bg-3);
+}
+.form-select option { background: var(--bg-2); color: var(--t1); }
+.form-select option:disabled { color: var(--t3); }
+.form-select-wrap .picker-arrow {
+    position: absolute;
+    right: 12px;
+    width: 10px;
+    height: 6px;
+    color: var(--t3);
+    pointer-events: none;
+}
+
 .modal-footer {
     display: flex; gap: 10px; justify-content: flex-end;
     margin-top: 22px; padding-top: 18px;
